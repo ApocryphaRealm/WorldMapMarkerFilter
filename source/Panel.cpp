@@ -18,10 +18,15 @@
 // update and no GFxValue is kept, so nothing can outlive the movie. The clip is removed when the panel closes.
 //
 // THE KEYBOARD. Apocrypha Menu Framework's on-screen keyboard closes itself unless the framework's own window is up
-// (Keyboard.cpp, Draw: !renderer::IsMainWindowVisible()), so it cannot serve a mod's window. So the panel has its own: a grid of
-// the characters the listed names actually use, which covers every language without layouts. On a real keyboard the
+// (Keyboard.cpp, Draw: !renderer::IsMainWindowVisible()), so it cannot serve a mod's window. So the panel has its own: QWERTY,
+// then any other character the listed names use, which covers every language, then Space and Delete. On a real keyboard the
 // panel asks the engine for its character events (ControlMap::AllowTextInput, as SkyUI's search does) and takes every key while
 // open, so typing "c" cannot also fire another mod's hotkey. Both edit one query string.
+//
+// HIDING AND FILTERING. Y on a row opens a small menu. Hide and "show only" set a marker's IconClip._visible, as Legendary Map
+// hides its types, on the map itself. Only a clip this panel hid is ever shown again, so another mod's hidden type stays hidden.
+// Hidden markers stay in the list, dimmed, so they can be brought back; they are kept in MapMarkerList_Hidden.txt, as icon frame
+// and name, so markers of one name and icon go together. A "show only" lasts until Show all or the game closes.
 //
 // THREADS. The input callback and UI tasks run on the game's main thread. Render runs on the render thread inside the
 // framework's frame. The marker list is an immutable shared vector swapped under the lock, so nothing is copied per frame.
@@ -41,9 +46,12 @@
 #include <atomic>
 #include <chrono>
 #include <format>
+#include <fstream>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace PanelStyle = mml::PanelStyle;
@@ -58,6 +66,9 @@ namespace panel
 		constexpr int kDefaultTypeRange = 60;
 		constexpr std::size_t kMaxQueryBytes = 96;
 		constexpr int kGridRowsShown = 6;
+		constexpr int kGridColumns = 10;
+		constexpr const char* kKeyboardBase = "1234567890QWERTYUIOPASDFGHJKL'ZXCVBNM-.,";
+		constexpr const char* kHiddenFile = "Data/SKSE/Plugins/MapMarkerList_Hidden.txt";
 		constexpr int kReadEveryFrames = 30;   // while the map is still making its marker clips
 
 		struct Marker
@@ -66,12 +77,14 @@ namespace panel
 			int frame = 1;       // the clip's iconFrame
 			std::string label;
 			std::wstring folded;
+			std::string key;     // what a hide is kept under: icon frame and name
+			bool hidden = false;
 		};
 
 		struct MarkerList
 		{
 			std::vector<Marker> markers;     // by name
-			std::vector<std::string> grid;   // the on-screen keyboard's characters; the first is the space
+			std::vector<std::string> grid;   // the on-screen keyboard's characters, without its last row (Space, Delete)
 		};
 
 		// The panel's life: closed; open (drawn, taking input); draining (it closed, and an invisible window keeps the input
@@ -91,11 +104,21 @@ namespace panel
 		std::atomic<bool> g_hasList{ false };     // this map movie has _root.WorldMap._markerList
 		std::atomic<bool> g_readPosted{ false };
 
+		// What the map shows. g_lock.
+		enum class Only : int { kNone = 0, kOne = 1, kKind = 2 };
+		std::set<std::string> g_hidden;
+		Only g_only = Only::kNone;
+		std::string g_onlyKey;
+		int g_onlyFrame = 0;
+
 		// ---- input to the render thread ---------------------------------------------------------------------------
 		std::atomic<int> pendingNavigate{ 0 };
 		std::atomic<int> pendingGridX{ 0 }, pendingGridY{ 0 };
 		std::atomic<bool> pendingSelect{ false }, pendingCancel{ false }, pendingGridPress{ false };
 		std::atomic<bool> gridOpen{ false };
+		std::atomic<bool> menuOpen{ false };
+		std::atomic<int> pendingMenuMove{ 0 };
+		std::atomic<bool> pendingMenuPress{ false };
 		std::atomic<bool> lastDeviceGamepad{ false };
 		enum : std::uint32_t { kHeldConfirm = 1, kHeldCancel = 2 };
 		std::atomic<std::uint32_t> heldButtons{ 0 };
@@ -109,6 +132,14 @@ namespace panel
 		int r_highlight = 0;
 		int r_top = 0;
 		int r_gridRow = 0, r_gridCol = 0, r_gridTop = 0;
+		Only r_only = Only::kNone;
+		std::string r_onlyKey;
+		int r_onlyFrame = 0;
+		bool r_menuHasTarget = false;
+		int r_menuRow = 0;
+		int r_menuFrame = 0;
+		bool r_menuHidden = false;
+		std::string r_menuKey, r_menuLabel;
 		int r_readCountdown = 0;
 		int r_drainFrames = 0;
 		std::uint32_t r_opens = 0;
@@ -139,6 +170,9 @@ namespace panel
 		bool m_iconsMissingLogged = false;       // main thread
 		std::atomic<bool> g_iconsOk{ false };
 		std::atomic<int> g_iconSlots{ 0 };
+		std::unordered_set<int> m_hiddenClips;   // main thread: the clips this panel hid, by place in _markerList
+		int m_watchFrames = 0;                   // main thread: the wait for a newly opened map's clips
+		std::atomic<int> g_hiddenClipCount{ 0 };
 
 		// ---- what the running game had (rule 30), for the state --------------------------------------------------------
 		std::atomic<int> g_clipCount{ 0 }, g_typeRange{ kDefaultTypeRange };
@@ -194,6 +228,141 @@ namespace panel
 
 		// ---- the map movie, UI tasks only ------------------------------------------------------------------------------
 
+		std::string MarkerKey(int a_frame, std::string_view a_label) { return std::format("{}|{}", a_frame, a_label); }
+
+		void LoadHidden()
+		{
+			std::ifstream in(kHiddenFile, std::ios::binary);
+			std::string line;
+			std::scoped_lock lock(g_lock);
+			while (std::getline(in, line))
+			{
+				if (!line.empty() && line.back() == '\r') { line.pop_back(); }
+				if (line.find('|') != std::string::npos) { g_hidden.insert(line); }
+			}
+			logger::info("{} marker name(s) hidden, from {}", g_hidden.size(), kHiddenFile);
+		}
+
+		void SaveHidden()
+		{
+			std::set<std::string> copy;
+			{
+				std::scoped_lock lock(g_lock);
+				copy = g_hidden;
+			}
+			std::ofstream out(kHiddenFile, std::ios::binary | std::ios::trunc);
+			for (const auto& line : copy) { out << line << '\n'; }
+			if (!out) { logger::warn("could not write {}; the hidden markers last until the game closes", kHiddenFile); }
+		}
+
+		// Is this clip a place the Location Finder would list? Reads its label and frame when it is.
+		bool ReadLocation(RE::GFxValue& a_clip, int a_typeRange, std::string& a_label, int& a_frame)
+		{
+			const int type = static_cast<int>(NumberMember(a_clip, "markerType", 0.0));
+			if (type <= 0 || type >= a_typeRange) { return false; }
+			// Where CoMAP has raised the range, the quest targets, doors and the player's own marker are still not locations.
+			RE::GFxValue iconName;
+			if (a_clip.GetMember("_iconName", &iconName) && iconName.IsString() && iconName.GetString())
+			{
+				const std::string_view name = iconName.GetString();
+				if (name == "EmptyMarker" || name == "DoorMarker" || name == "QuestTargetMarker" || name == "QuestTargetDoorMarker" ||
+					name == "MultipleQuestTargetMarker" || name == "PlayerSetMarker" || name == "YouAreHereMarker")
+				{
+					return false;
+				}
+			}
+			RE::GFxValue label;
+			if ((!a_clip.GetMember("_label", &label) || !label.IsString()) && (!a_clip.GetMember("label", &label) || !label.IsString())) { return false; }
+			const char* text = label.GetString();
+			if (!text || !*text) { return false; }
+			a_label = text;
+			a_frame = static_cast<int>(NumberMember(a_clip, "iconFrame", type + 1.0));
+			return true;
+		}
+
+		int TypeRange(RE::GFxMovieView* a_movie)
+		{
+			// CoMAP raises the finder's range to take in the icons it adds, so it is asked, not assumed.
+			RE::GFxValue range;
+			return a_movie->GetVariable(&range, "_global.Map.LocationFinder.TYPE_RANGE") && range.IsNumber() ? static_cast<int>(range.GetNumber()) : kDefaultTypeRange;
+		}
+
+		// Puts the hides and the "show only" on the map's clips. Returns how many clips the map has made. Main thread.
+		int ApplyVisibility()
+		{
+			auto movie = MapMovie();
+			RE::GFxValue worldMap, clips;
+			if (!movie || !movie->GetVariable(&worldMap, "_root.WorldMap") || !worldMap.IsObject() || !worldMap.GetMember("_markerList", &clips) || !clips.IsArray()) { return 0; }
+
+			std::set<std::string> hidden;
+			Only only;
+			std::string onlyKey;
+			int onlyFrame;
+			{
+				std::scoped_lock lock(g_lock);
+				hidden = g_hidden;
+				only = g_only;
+				onlyKey = g_onlyKey;
+				onlyFrame = g_onlyFrame;
+			}
+
+			const int typeRange = TypeRange(movie.get());
+			const auto size = clips.GetArraySize();
+			int made = 0;
+			for (std::uint32_t i = 0; i < size; ++i)
+			{
+				RE::GFxValue clip;
+				if (!clips.GetElement(i, &clip) || !clip.IsDisplayObject()) { continue; }
+				++made;
+				std::string label;
+				int frame = 0;
+				if (!ReadLocation(clip, typeRange, label, frame)) { continue; }
+				const auto key = MarkerKey(frame, label);
+				const bool hide = hidden.contains(key) || (only == Only::kOne && key != onlyKey) || (only == Only::kKind && frame != onlyFrame);
+				RE::GFxValue icon, shown;
+				if (!clip.GetMember("IconClip", &icon) || !icon.IsDisplayObject()) { continue; }
+				const int place = static_cast<int>(i);
+				if (hide)
+				{
+					if (icon.GetMember("_visible", &shown) && shown.IsBool() && shown.GetBool())
+					{
+						icon.SetMember("_visible", RE::GFxValue(false));
+						m_hiddenClips.insert(place);
+					}
+				}
+				else if (m_hiddenClips.erase(place) > 0)
+				{
+					icon.SetMember("_visible", RE::GFxValue(true));
+				}
+			}
+			g_hiddenClipCount = static_cast<int>(m_hiddenClips.size());
+			return made;
+		}
+
+		// A newly opened map makes its clips ten a frame, so the hides go on as they appear, every few frames until it is done.
+		void WatchNewMap()
+		{
+			{
+				std::scoped_lock lock(g_lock);
+				if (g_hidden.empty() && g_only == Only::kNone) { return; }
+			}
+			auto* ui = RE::UI::GetSingleton();
+			const int frame = ++m_watchFrames;
+			if (!ui || frame > 1800 || (frame > 120 && !ui->IsMenuOpen(RE::MapMenu::MENU_NAME))) { return; }
+			if (frame % 10 == 0)
+			{
+				const int made = ApplyVisibility();
+				auto movie = MapMovie();
+				RE::GFxValue worldMap;
+				if (made > 0 && movie && movie->GetVariable(&worldMap, "_root.WorldMap") && worldMap.IsObject() && NumberMember(worldMap, "_nextCreateIndex", -1.0) == -1.0)
+				{
+					logger::debug("the new map's {} clips are made; {} hidden", made, g_hiddenClipCount.load());
+					return;
+				}
+			}
+			RunUI(WatchNewMap);
+		}
+
 		// Reads the marker clips. Main thread.
 		void ReadMarkers()
 		{
@@ -220,10 +389,13 @@ namespace panel
 			}
 			g_hasList = true;
 
-			// CoMAP raises the finder's range to take in the icons it adds, so it is asked, not assumed.
-			RE::GFxValue range;
-			const int typeRange = movie->GetVariable(&range, "_global.Map.LocationFinder.TYPE_RANGE") && range.IsNumber() ? static_cast<int>(range.GetNumber()) : kDefaultTypeRange;
+			const int typeRange = TypeRange(movie.get());
 			g_typeRange = typeRange;
+			std::set<std::string> hidden;
+			{
+				std::scoped_lock lock(g_lock);
+				hidden = g_hidden;
+			}
 
 			auto list = std::make_shared<MarkerList>();
 			const auto size = clips.GetArraySize();
@@ -234,36 +406,24 @@ namespace panel
 				RE::GFxValue clip;
 				if (!clips.GetElement(i, &clip) || !clip.IsDisplayObject()) { continue; }
 				++madeClips;
-				const int type = static_cast<int>(NumberMember(clip, "markerType", 0.0));
-				if (type <= 0 || type >= typeRange) { continue; }
-				// Where CoMAP has raised the range, the quest targets, doors and the player's own marker are still not locations.
-				RE::GFxValue iconName;
-				if (clip.GetMember("_iconName", &iconName) && iconName.IsString() && iconName.GetString())
-				{
-					const std::string_view name = iconName.GetString();
-					if (name == "EmptyMarker" || name == "DoorMarker" || name == "QuestTargetMarker" || name == "QuestTargetDoorMarker" ||
-						name == "MultipleQuestTargetMarker" || name == "PlayerSetMarker" || name == "YouAreHereMarker")
-					{
-						continue;
-					}
-				}
-				RE::GFxValue icon, shown;
-				if (clip.GetMember("IconClip", &icon) && icon.IsDisplayObject() && icon.GetMember("_visible", &shown) && shown.IsBool() && !shown.GetBool()) { continue; }
-				RE::GFxValue label;
-				if ((!clip.GetMember("_label", &label) || !label.IsString()) && (!clip.GetMember("label", &label) || !label.IsString())) { continue; }
-				const char* text = label.GetString();
-				if (!text || !*text) { continue; }
 				Marker marker;
+				if (!ReadLocation(clip, typeRange, marker.label, marker.frame)) { continue; }
+				// Hidden by another mod: not listed. Hidden by this panel: listed, so it can be brought back.
+				RE::GFxValue icon, shown;
+				if (clip.GetMember("IconClip", &icon) && icon.IsDisplayObject() && icon.GetMember("_visible", &shown) && shown.IsBool() && !shown.GetBool() && !m_hiddenClips.contains(static_cast<int>(i))) { continue; }
 				marker.index = static_cast<int>(NumberMember(clip, "index", static_cast<double>(i)));
-				marker.frame = static_cast<int>(NumberMember(clip, "iconFrame", type + 1.0));
-				marker.label = text;
 				marker.folded = fold::Lower(marker.label);
+				marker.key = MarkerKey(marker.frame, marker.label);
+				marker.hidden = hidden.contains(marker.key);
 				names.push_back(marker.folded);
 				list->markers.push_back(std::move(marker));
 			}
 			std::ranges::stable_sort(list->markers, [](const Marker& a, const Marker& b) { return a.folded < b.folded; });
-			list->grid = fold::Alphabet(names);
-			list->grid.insert(list->grid.begin(), " ");
+			for (const char* c = kKeyboardBase; *c; ++c) { list->grid.emplace_back(1, *c); }
+			for (auto& character : fold::Alphabet(names))
+			{
+				if (std::ranges::find(list->grid, character) == list->grid.end()) { list->grid.push_back(std::move(character)); }
+			}
 
 			const bool loading = NumberMember(worldMap, "_nextCreateIndex", -1.0) != -1.0;
 			const auto listed = list->markers.size();
@@ -526,8 +686,8 @@ namespace panel
 			const auto code = a_button.GetIDCode();
 			if (a_button.GetDevice() == RE::INPUT_DEVICE::kGamepad)
 			{
-				// With the grid open the D-pad walks the grid, so a toggle on the D-pad only toggles with it closed.
-				if (IsToggle(a_button) && !gridOpen) { return Key::kToggle; }
+				// With the grid or the row menu open the D-pad walks them, so a toggle on the D-pad only toggles with both closed.
+				if (IsToggle(a_button) && !gridOpen && !menuOpen) { return Key::kToggle; }
 				switch (code)
 				{
 				case 0x0001: return Key::kUp;
@@ -548,6 +708,7 @@ namespace panel
 				{
 				case 0xC8: return Key::kUp;
 				case 0xD0: return Key::kDown;
+				case 0xCD: return Key::kRight;
 				case 0x1C: case 0x9C: return Key::kConfirm;
 				case 0x01: case 0x0F: return Key::kCancel;  // Escape, Tab
 				case 0x0E: return Key::kBackspace;
@@ -631,6 +792,9 @@ namespace panel
 			pendingGridX = pendingGridY = 0;
 			pendingSelect = pendingCancel = pendingGridPress = false;
 			gridOpen = false;
+			menuOpen = false;
+			pendingMenuMove = 0;
+			pendingMenuPress = false;
 			heldButtons = 0;
 			g_loading = true;
 			g_iconsOk = false;
@@ -655,6 +819,7 @@ namespace panel
 						return;
 					}
 				}
+				ApplyVisibility();
 				ReadMarkers();
 			});
 			return true;
@@ -697,7 +862,7 @@ namespace panel
 			const auto type = a_event->GetEventType();
 			if (type == RE::INPUT_EVENT_TYPE::kChar)
 			{
-				if (static_cast<State>(state.load()) == State::kOpen)
+				if (static_cast<State>(state.load()) == State::kOpen && !menuOpen)
 				{
 					const auto text = fold::FromCodePoint(static_cast<const RE::CharEvent*>(a_event)->keyCode);
 					if (!text.empty())
@@ -721,7 +886,8 @@ namespace panel
 				const int dirY = stick->yValue > 0.5f ? -1 : (stick->yValue < -0.5f ? 1 : 0);
 				const auto now = std::chrono::steady_clock::now();
 				const auto step = [&] {
-					if (gridOpen)
+					if (menuOpen) { pendingMenuMove += dirY; }
+					else if (gridOpen)
 					{
 						pendingGridX += dirX;
 						pendingGridY += dirY;
@@ -776,28 +942,32 @@ namespace panel
 			switch (key)
 			{
 			case Key::kUp:
-				if (step) { if (gridOpen) { --pendingGridY; } else { --pendingNavigate; } }
+				if (step) { if (menuOpen) { --pendingMenuMove; } else if (gridOpen) { --pendingGridY; } else { --pendingNavigate; } }
 				break;
 			case Key::kDown:
-				if (step) { if (gridOpen) { ++pendingGridY; } else { ++pendingNavigate; } }
+				if (step) { if (menuOpen) { ++pendingMenuMove; } else if (gridOpen) { ++pendingGridY; } else { ++pendingNavigate; } }
 				break;
 			case Key::kLeft:
 				if (step && gridOpen) { --pendingGridX; }
 				break;
 			case Key::kRight:
 				if (step && gridOpen) { ++pendingGridX; }
+				else if (fresh && !gridOpen && device == RE::INPUT_DEVICE::kKeyboard) { menuOpen = !menuOpen; }
 				break;
 			case Key::kConfirm:
 				if (fresh)
 				{
 					heldButtons |= kHeldConfirm;
-					if (gridOpen) { pendingGridPress = true; } else { pendingSelect = true; }
+					if (menuOpen) { pendingMenuPress = true; }
+					else if (gridOpen) { pendingGridPress = true; }
+					else { pendingSelect = true; }
 				}
 				break;
 			case Key::kCancel:
 				if (fresh)
 				{
-					if (gridOpen && device == RE::INPUT_DEVICE::kGamepad) { gridOpen = false; }
+					if (menuOpen) { menuOpen = false; }
+					else if (gridOpen && device == RE::INPUT_DEVICE::kGamepad) { gridOpen = false; }
 					else
 					{
 						heldButtons |= kHeldCancel;
@@ -813,10 +983,15 @@ namespace panel
 				}
 				break;
 			case Key::kGrid:
-				if (fresh) { gridOpen = !gridOpen; }
+				if (fresh && !menuOpen) { gridOpen = !gridOpen; }
 				break;
 			case Key::kBackspace:
-				if (step) { EditQuery([](std::string& q) { fold::DropLast(q); }); }
+				// Y: on the list the row's menu, on the keyboard a delete. The real Backspace always deletes.
+				if (device == RE::INPUT_DEVICE::kGamepad && !gridOpen)
+				{
+					if (fresh) { menuOpen = !menuOpen; }
+				}
+				else if (step) { EditQuery([](std::string& q) { fold::DropLast(q); }); }
 				break;
 			default:
 				break;
@@ -862,6 +1037,8 @@ namespace panel
 			r_filtered.reserve(markers.size());
 			for (int i = 0; i < static_cast<int>(markers.size()); ++i)
 			{
+				if (r_only == Only::kOne && markers[i].key != r_onlyKey) { continue; }
+				if (r_only == Only::kKind && markers[i].frame != r_onlyFrame) { continue; }
 				if (query.empty() || markers[i].folded.find(query) != std::wstring::npos) { r_filtered.push_back(i); }
 			}
 		}
@@ -891,8 +1068,9 @@ namespace panel
 			Dummy(ImVec2{ room.x, height });
 		}
 
-		// The controller's on-screen keyboard: the characters the names use. The space is drawn as an underscore.
-		void DrawGrid(float a_height, float a_cell, int a_columns)
+		// The controller's on-screen keyboard: a tile per key, the key under the cursor filled in the text colour with its letter in
+		// black or white, so it stands out in any theme. The last row is Space and Delete, half the width each.
+		void DrawGrid(float a_height, float a_cellW, float a_cellH)
 		{
 			using namespace ImGuiMCP;
 			const ImVec2 at = GetCursorScreenPos();
@@ -900,29 +1078,81 @@ namespace panel
 			auto* list = GetWindowDrawList();
 			const auto& chars = r_list->grid;
 			const int total = static_cast<int>(chars.size());
-			const int rows = (total + a_columns - 1) / a_columns;
+			const int letterRows = (total + kGridColumns - 1) / kGridColumns;
+			const int rows = letterRows + 1;
 			if (r_gridRow < r_gridTop) { r_gridTop = r_gridRow; }
 			if (r_gridRow >= r_gridTop + kGridRowsShown) { r_gridTop = r_gridRow - kGridRowsShown + 1; }
 			r_gridTop = std::clamp(r_gridTop, 0, (std::max)(rows - kGridRowsShown, 0));
 			const float lineH = GetTextLineHeight();
+
+			std::uint32_t markText = 0xFF000000;
+			if (const auto* style = GetStyle())
+			{
+				const auto& text = style->Colors[ImGuiCol_Text];
+				if (text.x * 0.3f + text.y * 0.6f + text.z * 0.1f < 0.5f) { markText = 0xFFFFFFFF; }
+			}
+			const auto drawKey = [&](float a_x, float a_y, float a_w, bool a_here, const char* a_text) {
+				const ImVec2 to{ a_x + a_w - 2.0f, a_y + a_cellH - 2.0f };
+				ImDrawListManager::AddRectFilled(list, ImVec2{ a_x, a_y }, to, GetColorU32(a_here ? ImGuiCol_Text : ImGuiCol_FrameBg), 0.0f, 0);
+				const ImVec2 size = CalcTextSize(a_text);
+				ImDrawListManager::AddText(list, ImVec2{ a_x + (a_w - 2.0f - size.x) * 0.5f, a_y + (a_cellH - 2.0f - lineH) * 0.5f }, a_here ? markText : GetColorU32(ImGuiCol_Text), a_text);
+			};
+
 			if (list)
 			{
 				for (int row = r_gridTop; row < rows && row < r_gridTop + kGridRowsShown; ++row)
 				{
-					for (int col = 0; col < a_columns; ++col)
+					const float y = at.y + static_cast<float>(row - r_gridTop) * a_cellH;
+					if (row == letterRows)
 					{
-						const int i = row * a_columns + col;
+						const float half = a_cellW * static_cast<float>(kGridColumns) * 0.5f;
+						const bool onRow = r_gridRow == letterRows;
+						drawKey(at.x, y, half, onRow && r_gridCol < kGridColumns / 2, TR("MML_KeySpace", "Space").c_str());
+						drawKey(at.x + half, y, half, onRow && r_gridCol >= kGridColumns / 2, TR("MML_KeyDelete", "Delete").c_str());
+						continue;
+					}
+					for (int col = 0; col < kGridColumns; ++col)
+					{
+						const int i = row * kGridColumns + col;
 						if (i >= total) { break; }
-						const ImVec2 cell{ at.x + static_cast<float>(col) * a_cell, at.y + static_cast<float>(row - r_gridTop) * a_cell };
-						const bool here = row == r_gridRow && col == r_gridCol;
-						if (here) { ImDrawListManager::AddRectFilled(list, cell, ImVec2{ cell.x + a_cell - 2.0f, cell.y + a_cell - 2.0f }, GetColorU32(ImGuiCol_Header), 0.0f, 0); }
-						const char* text = i == 0 ? "_" : chars[i].c_str();
-						const ImVec2 size = CalcTextSize(text);
-						ImDrawListManager::AddText(list, ImVec2{ cell.x + (a_cell - 2.0f - size.x) * 0.5f, cell.y + (a_cell - 2.0f - lineH) * 0.5f }, GetColorU32(ImGuiCol_Text), text);
+						drawKey(at.x + static_cast<float>(col) * a_cellW, y, a_cellW, row == r_gridRow && col == r_gridCol, chars[static_cast<std::size_t>(i)].c_str());
 					}
 				}
 			}
 			Dummy(ImVec2{ room.x, a_height });
+		}
+
+		enum class MenuAction { kCentre, kHide, kShow, kOnlyOne, kOnlyKind, kShowAll };
+
+		// Changes what the map shows, then lets the map and the list catch up. Render thread.
+		void RunMenuAction(MenuAction a_action)
+		{
+			const bool hiddenChanged = a_action == MenuAction::kHide || a_action == MenuAction::kShow;
+			{
+				std::scoped_lock lock(g_lock);
+				switch (a_action)
+				{
+				case MenuAction::kHide: g_hidden.insert(r_menuKey); break;
+				case MenuAction::kShow: g_hidden.erase(r_menuKey); break;
+				case MenuAction::kOnlyOne:
+					g_only = Only::kOne;
+					g_onlyKey = r_menuKey;
+					break;
+				case MenuAction::kOnlyKind:
+					g_only = Only::kKind;
+					g_onlyFrame = r_menuFrame;
+					break;
+				case MenuAction::kShowAll: g_only = Only::kNone; break;
+				default: return;
+				}
+				++g_queryGeneration;
+			}
+			logger::info("marker menu: action {} on \"{}\"", static_cast<int>(a_action), r_menuLabel);
+			RunUI([hiddenChanged] {
+				if (hiddenChanged) { SaveHidden(); }
+				ApplyVisibility();
+				ReadMarkers();
+			});
 		}
 
 		void __stdcall Render()
@@ -970,6 +1200,9 @@ namespace panel
 				{
 					r_queryGeneration = g_queryGeneration;
 					r_query = g_query;
+					r_only = g_only;
+					r_onlyKey = g_onlyKey;
+					r_onlyFrame = g_onlyFrame;
 					refilter = true;
 					r_highlight = 0;
 					r_top = 0;
@@ -992,6 +1225,45 @@ namespace panel
 			const bool cancel = pendingCancel.exchange(false);
 
 			const bool showGrid = gridOpen.load() && r_list && !r_list->grid.empty();
+
+			// The row menu is about the row that was highlighted when it opened; the list stands still while it is up.
+			if (!menuOpen)
+			{
+				r_menuHasTarget = false;
+				pendingMenuMove = 0;
+				pendingMenuPress = false;
+			}
+			else if (!r_menuHasTarget)
+			{
+				if (count > 0 && r_list)
+				{
+					const Marker& marker = r_list->markers[static_cast<std::size_t>(r_filtered[static_cast<std::size_t>(r_highlight)])];
+					r_menuHasTarget = true;
+					r_menuRow = 0;
+					r_menuKey = marker.key;
+					r_menuLabel = marker.label;
+					r_menuFrame = marker.frame;
+					r_menuHidden = marker.hidden;
+				}
+				else
+				{
+					menuOpen = false;
+				}
+			}
+			const bool showMenu = r_menuHasTarget;
+			std::vector<std::pair<MenuAction, std::string>> menuItems;
+			if (showMenu)
+			{
+				menuItems.emplace_back(MenuAction::kCentre, TR("MML_MenuCentre", "Centre the map on it"));
+				if (r_menuHidden) { menuItems.emplace_back(MenuAction::kShow, TR("MML_MenuShow", "Show it again")); }
+				else { menuItems.emplace_back(MenuAction::kHide, TR("MML_MenuHide", "Hide it")); }
+				menuItems.emplace_back(MenuAction::kOnlyOne, TR("MML_MenuOnlyOne", "Show only this one"));
+				menuItems.emplace_back(MenuAction::kOnlyKind, TR("MML_MenuOnlyKind", "Show only this kind"));
+				if (r_only != Only::kNone) { menuItems.emplace_back(MenuAction::kShowAll, TR("MML_MenuShowAll", "Show all")); }
+				r_menuRow = std::clamp(r_menuRow + pendingMenuMove.exchange(0), 0, static_cast<int>(menuItems.size()) - 1);
+			}
+			int menuPressed = -1;
+			if (showMenu && pendingMenuPress.exchange(false)) { menuPressed = r_menuRow; }
 
 			SetNextWindowPos(ImVec2{ g.x, g.y }, ImGuiCond_Always);
 			SetNextWindowSize(ImVec2{ g.w, g.h }, ImGuiCond_Always);
@@ -1019,7 +1291,8 @@ namespace panel
 				SetWindowFontScale(static_cast<float>(settings::textScalePercent.load()) / 100.0f);
 
 				const bool titlePushed = PanelStyle::PushRowText(true);
-				if (const auto title = TR("MML_PanelTitle", "Map Markers"); r_list && !r_list->markers.empty()) { Text("%s (%d)", title.c_str(), count); }
+				if (const auto title = TR("MML_PanelTitle", "Map Markers"); r_only != Only::kNone) { Text("%s (%d) - %s", title.c_str(), count, TR("MML_TitleFiltered", "filtered").c_str()); }
+				else if (r_list && !r_list->markers.empty()) { Text("%s (%d)", title.c_str(), count); }
 				else { Text("%s", title.c_str()); }
 				PanelStyle::PopRowText(titlePushed);
 				if (!PanelStyle::DrawSeparator()) { Separator(); }
@@ -1032,29 +1305,39 @@ namespace panel
 				const float rowH = GetTextLineHeightWithSpacing();
 				const float iconColumn = rowH * 1.3f;
 
-				const std::string hint = showGrid ? TR("MML_HintGrid", "D-pad: choose a letter   A: add it   Y: delete   B: back to the list") :
-				                         (lastDeviceGamepad ? TR("MML_HintPad", "D-pad: move   A: centre the map   X: type   Y: delete   B: close") :
-				                                              TR("MML_HintKeys", "Type to search   Arrows or wheel: move   Enter or click: centre the map   Esc: close"));
+				const std::string hint = showMenu ? TR("MML_HintMenu", "D-pad: choose   A: do it   B: back to the list") :
+				                         showGrid ? TR("MML_HintGrid", "D-pad: choose a letter   A: add it   Y: delete   B: back to the list") :
+				                         (lastDeviceGamepad ? TR("MML_HintPad", "D-pad: move   A: centre the map   X: type   Y: options   B: close") :
+				                                              TR("MML_HintKeys", "Type to search   Arrows or wheel: move   Right arrow: options   Enter or click: centre the map   Esc: close"));
 				const float hintH = CalcTextSize(hint.c_str(), nullptr, false, room.x).y + rowH;
 
-				// The grid's size, from the width: the list gives up its height while the grid is open.
-				const float cell = (std::max)(lineH * 1.7f, room.x / 16.0f);
-				const int columns = (std::max)(static_cast<int>(room.x / cell), 1);
+				// The grid's size, from the width: the list gives up its height while the grid or the row menu is open.
+				const float cellW = room.x / static_cast<float>(kGridColumns);
+				const float cellH = lineH * 1.8f;
 				float gridH = 0.0f;
+				const float menuH = showMenu ? rowH * static_cast<float>(menuItems.size() + 1) : 0.0f;
 				if (showGrid)
 				{
 					const int total = static_cast<int>(r_list->grid.size());
-					const int gridRows = (std::min)((total + columns - 1) / columns, kGridRowsShown);
-					gridH = static_cast<float>(gridRows) * cell;
+					const int letterRows = (total + kGridColumns - 1) / kGridColumns;
+					const int rowsAll = letterRows + 1;
+					gridH = static_cast<float>((std::min)(rowsAll, kGridRowsShown)) * cellH;
 
-					const int rowsAll = (total + columns - 1) / columns;
 					r_gridRow = std::clamp(r_gridRow + pendingGridY.exchange(0), 0, rowsAll - 1);
-					r_gridCol = std::clamp(r_gridCol + pendingGridX.exchange(0), 0, columns - 1);
-					if (r_gridRow * columns + r_gridCol >= total) { r_gridCol = (total - 1) % columns; }
+					r_gridCol = std::clamp(r_gridCol + pendingGridX.exchange(0), 0, kGridColumns - 1);
+					if (r_gridRow < letterRows && r_gridRow * kGridColumns + r_gridCol >= total) { r_gridCol = (total - 1) % kGridColumns; }
 					if (pendingGridPress.exchange(false))
 					{
-						const std::string& picked = r_list->grid[static_cast<std::size_t>(r_gridRow * columns + r_gridCol)];
-						EditQuery([&](std::string& q) { if (q.size() + picked.size() <= kMaxQueryBytes) { q += picked; } });
+						if (r_gridRow == letterRows)
+						{
+							if (r_gridCol < kGridColumns / 2) { EditQuery([](std::string& q) { if (q.size() < kMaxQueryBytes) { q += ' '; } }); }
+							else { EditQuery([](std::string& q) { fold::DropLast(q); }); }
+						}
+						else
+						{
+							const std::string& picked = r_list->grid[static_cast<std::size_t>(r_gridRow * kGridColumns + r_gridCol)];
+							EditQuery([&](std::string& q) { if (q.size() + picked.size() <= kMaxQueryBytes) { q += picked; } });
+						}
 					}
 				}
 				else
@@ -1063,7 +1346,7 @@ namespace panel
 					pendingGridPress = false;
 				}
 
-				const float listH = (std::max)(room.y - hintH - gridH, rowH);
+				const float listH = (std::max)(room.y - hintH - gridH - menuH, rowH);
 				const int visible = (std::max)(static_cast<int>(listH / rowH), 1);
 				const ImVec2 listAt = GetCursorScreenPos();
 
@@ -1107,9 +1390,13 @@ namespace panel
 						}
 						if (IsItemHovered() && mouseMoved) { r_highlight = row; }
 						SameLine(textX);
-						const bool textPushed = PanelStyle::PushRowText(selected);
+						// A hidden marker is dimmed; the highlight still reads as the highlight.
+						const auto* dimStyle = marker.hidden && !selected ? GetStyle() : nullptr;
+						if (dimStyle) { PushStyleColor(ImGuiCol_Text, dimStyle->Colors[ImGuiCol_TextDisabled]); }
+						const bool textPushed = !dimStyle && PanelStyle::PushRowText(selected);
 						TextUnformatted(marker.label.c_str());
 						PanelStyle::PopRowText(textPushed);
+						if (dimStyle) { PopStyleColor(1); }
 						layout.slots.push_back({ at.y + lineH * 0.5f, marker.frame });
 					}
 				}
@@ -1145,7 +1432,29 @@ namespace panel
 				}
 
 				SetCursorScreenPos(ImVec2{ listAt.x, listAt.y + listH });
-				if (showGrid) { DrawGrid(gridH, cell, columns); }
+				if (showGrid) { DrawGrid(gridH, cellW, cellH); }
+				if (showMenu)
+				{
+					if (const auto* style = GetStyle()) { PushStyleColor(ImGuiCol_Text, style->Colors[ImGuiCol_TextDisabled]); }
+					TextUnformatted(r_menuLabel.c_str());
+					if (GetStyle()) { PopStyleColor(1); }
+					for (int row = 0; row < static_cast<int>(menuItems.size()); ++row)
+					{
+						const ImVec2 at = GetCursorScreenPos();
+						const bool selected = row == r_menuRow;
+						if (selected && PanelStyle::IsActive())
+						{
+							const auto* rowStyle = GetStyle();
+							const float halfGap = rowStyle ? rowStyle->ItemSpacing.y * 0.5f : 0.0f;
+							PanelStyle::DrawRowHighlight(GetWindowDrawList(), at.x, at.y - halfGap, at.x + room.x, at.y + lineH + halfGap);
+						}
+						if (Selectable(std::format("##menu{}", row).c_str(), selected, 0, ImVec2{ 0.0f, lineH })) { menuPressed = row; }
+						SameLine(textX);
+						const bool textPushed = PanelStyle::PushRowText(selected);
+						TextUnformatted(menuItems[static_cast<std::size_t>(row)].second.c_str());
+						PanelStyle::PopRowText(textPushed);
+					}
+				}
 
 				if (!PanelStyle::DrawSeparator()) { Separator(); }
 				if (const auto* style = GetStyle()) { PushStyleColor(ImGuiCol_Text, style->Colors[ImGuiCol_TextDisabled]); }
@@ -1182,6 +1491,14 @@ namespace panel
 					g_layout = layout;
 				}
 				if (!g_layoutPosted.exchange(true)) { RunUI(ApplyLayout); }
+			}
+
+			if (menuPressed >= 0 && menuPressed < static_cast<int>(menuItems.size()))
+			{
+				const MenuAction action = menuItems[static_cast<std::size_t>(menuPressed)].first;
+				menuOpen = false;
+				if (action == MenuAction::kCentre) { chosen = r_highlight; }
+				else { RunMenuAction(action); }
 			}
 
 			if (chosen >= 0 && chosen < count && r_list)
@@ -1221,6 +1538,7 @@ namespace panel
 			return false;
 		}
 		if (!HasRequiredExports()) { return false; }
+		LoadHidden();
 		PanelStyle::Load();
 		if (PanelStyle::IsActive()) { PanelStyle::HasRequiredExports(); }
 		// BlockUserInput: while open, the framework takes the controller, keyboard and mouse from the game (the map stays still).
@@ -1237,9 +1555,20 @@ namespace panel
 		return true;
 	}
 
+	void OnMapMenuOpened()
+	{
+		RunUI([] {
+			m_hiddenClips.clear();
+			m_watchFrames = 0;
+			WatchNewMap();
+		});
+	}
+
 	void OnMapMenuClosed()
 	{
 		ReleaseTextInput();
+		m_hiddenClips.clear();
+		g_hiddenClipCount = 0;
 		m_slotFrame.clear();
 		m_appliedBack = Layout{};
 		if (static_cast<State>(state.load()) == State::kClosed) { return; }
@@ -1271,15 +1600,22 @@ namespace panel
 		pendingGridY += a_dy;
 	}
 	void DriveGridPress() { pendingGridPress = true; }
+	void DriveMenuToggle() { menuOpen = !menuOpen; }
+	void DriveMenuMove(int a_rows) { pendingMenuMove += a_rows; }
+	void DriveMenuPress() { pendingMenuPress = true; }
 
 	std::string StateJson(int a_names)
 	{
 		std::shared_ptr<const MarkerList> list;
 		std::string query;
+		std::size_t hiddenNames = 0;
+		int only = 0;
 		{
 			std::scoped_lock lock(g_lock);
 			list = g_list;
 			query = g_query;
+			hiddenNames = g_hidden.size();
+			only = static_cast<int>(g_only);
 		}
 		std::string names = "[";
 		if (a_names > 0 && list)
@@ -1297,9 +1633,9 @@ namespace panel
 		names += "]";
 		return std::format(
 			R"({{"available":{},"open":{},"state":{},"hasMarkerList":{},"loading":{},"clipsMade":{},"typeRange":{},"listed":{},"query":"{}","filtered":{},"highlight":{},"top":{},"visibleRows":{},)"
-			R"("textInputHeld":{},"gridOpen":{},"gridChars":{},"iconsOk":{},"iconSlots":{},"rect":[{:.0f},{:.0f},{:.0f},{:.0f}],"opens":{},"selections":{},"showOnMapCalls":{},"claimedHeld":{},"gamepad":{},"language":"{}","style":{},"names":{}}})",
+			R"("textInputHeld":{},"gridOpen":{},"gridChars":{},"menuOpen":{},"hiddenNames":{},"hiddenClips":{},"only":{},"iconsOk":{},"iconSlots":{},"rect":[{:.0f},{:.0f},{:.0f},{:.0f}],"opens":{},"selections":{},"showOnMapCalls":{},"claimedHeld":{},"gamepad":{},"language":"{}","style":{},"names":{}}})",
 			window != nullptr, state.load() != 0, state.load(), g_hasList.load(), g_loading.load(), g_clipCount.load(), g_typeRange.load(), list ? list->markers.size() : 0, JsonEscape(query), lastFiltered.load(),
-			lastHighlight.load(), lastTop.load(), lastVisible.load(), g_textInputHeld, gridOpen.load(), lastGridChars.load(), g_iconsOk.load(), g_iconSlots.load(), lastX.load(), lastY.load(), lastW.load(), lastH.load(),
+			lastHighlight.load(), lastTop.load(), lastVisible.load(), g_textInputHeld, gridOpen.load(), lastGridChars.load(), menuOpen.load(), hiddenNames, g_hiddenClipCount.load(), only, g_iconsOk.load(), g_iconSlots.load(), lastX.load(), lastY.load(), lastW.load(), lastH.load(),
 			opens.load(), selections.load(), showOnMapCalls.load(), claimedHeld.size(), lastDeviceGamepad.load(), mml::Strings::Language(), PanelStyle::StateJson(), names);
 	}
 }

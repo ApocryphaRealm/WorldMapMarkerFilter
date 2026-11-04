@@ -12,13 +12,17 @@
 
 namespace
 {
-	// Only the world map's close matters: the panel closes with it. Nothing runs per frame for this.
+	// The world map's open puts the hidden markers back on it; its close closes the panel. Nothing runs per frame for this.
 	class MenuSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 	{
 	public:
 		RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
 		{
-			if (a_event && !a_event->opening && a_event->menuName == RE::MapMenu::MENU_NAME) { panel::OnMapMenuClosed(); }
+			if (a_event && a_event->menuName == RE::MapMenu::MENU_NAME)
+			{
+				if (a_event->opening) { panel::OnMapMenuOpened(); }
+				else { panel::OnMapMenuClosed(); }
+			}
 			return RE::BSEventNotifyControl::kContinue;
 		}
 	};

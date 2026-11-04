@@ -68,6 +68,9 @@ namespace DevBenchTool
 			else if (op == "grid") { panel::DriveGridToggle(); }
 			else if (op == "gridmove") { panel::DriveGridMove(GetInt(args, "dx", 0), GetInt(args, "dy", 0)); }
 			else if (op == "gridpress") { panel::DriveGridPress(); }
+			else if (op == "menu") { panel::DriveMenuToggle(); }
+			else if (op == "menumove") { panel::DriveMenuMove(GetInt(args, "rows", 1)); }
+			else if (op == "menupress") { panel::DriveMenuPress(); }
 			auto* ui = RE::UI::GetSingleton();
 			const bool mapOpen = ui && ui->IsMenuOpen(RE::MapMenu::MENU_NAME);
 			const std::string out = std::format(R"({{"ok":true,"op":"{}","mapMenuOpen":{},"toggleKey":{},"togglePad":{},"panel":{}}})", op.empty() ? "state" : op, mapOpen,
@@ -90,7 +93,7 @@ namespace DevBenchTool
 			"{"
 			"\"description\":\"Map Marker List: the panel's live state and driver. op=state (default): open, listed and filtered rows, query, highlight, icon state, rectangle, counters; names=N lists rows. "
 			"op=open asks through the same gate a press uses (the world map must be open). op=close. op=nav rows=N. op=select centres the map on the highlighted row and closes. "
-			"op=type text=T, op=backspace, op=clear edit the search. op=grid toggles the on-screen keyboard, op=gridmove dx dy, op=gridpress types the highlighted character.\","
+			"op=type text=T, op=backspace, op=clear edit the search. op=grid toggles the on-screen keyboard, op=gridmove dx dy, op=gridpress types the highlighted key. op=menu toggles the highlighted row's menu, op=menumove rows=N, op=menupress does its highlighted item.\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{\"op\":{\"type\":\"string\"},\"rows\":{\"type\":\"integer\"},\"text\":{\"type\":\"string\"},\"names\":{\"type\":\"integer\"},\"dx\":{\"type\":\"integer\"},\"dy\":{\"type\":\"integer\"}}},"
 			"\"readOnly\":false"
 			"}";
