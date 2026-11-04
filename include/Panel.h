@@ -29,6 +29,7 @@ namespace panel
 	void DriveMenuToggle();
 	void DriveMenuMove(int a_rows);
 	void DriveMenuPress();
+	void DriveTypesToggle();
 
 	// The panel's live state as a JSON object (rule 31); a_names lists that many of the rows the filter leaves.
 	std::string StateJson(int a_names);

@@ -21,9 +21,10 @@ Outside the world map both presses are left to the game.
 - The marker's menu: centre the map on it, hide it (or show it again), show only this one, show only this kind, and, while one of
   those is on, show all. A hidden marker leaves the map and stays in the list, dimmed, and stays hidden in every game until shown again.
   Markers of one name and icon go together. A "show only" lasts until Show all or the game closes.
+- **RB** shows the marker types, as Legendary Map's legend does: each type with how many markers it has, and **A** hides or shows them all. Hidden types stay hidden in every game until shown again. The type names come from the map's icon names, in English.
 - On-screen keyboard: QWERTY, then any other character the listed names use, so it fits every language, then Space and Delete. The
   D-pad walks the keys, **A** presses one, **Y** deletes.
-- Keyboard and mouse: type to search; arrows or the wheel move; the right arrow opens the marker's menu; Enter or a click centres the map; Backspace deletes; Esc or Tab closes.
+- Keyboard and mouse: type to search; arrows or the wheel move; the right arrow opens the marker's menu; the left arrow shows the types; Enter or a click centres the map; Backspace deletes; Esc or Tab closes.
 
 Only what the map shows is listed: a marker you have not found is not on the map, so it is not here, and a marker type another
 mod has hidden (Legendary Map) is left out. A marker the map shows as undiscovered is listed with that same icon.

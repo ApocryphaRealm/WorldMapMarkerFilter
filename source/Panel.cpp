@@ -27,6 +27,7 @@
 // hides its types, on the map itself. Only a clip this panel hid is ever shown again, so another mod's hidden type stays hidden.
 // Hidden markers stay in the list, dimmed, so they can be brought back; they are kept in MapMarkerList_Hidden.txt, as icon frame
 // and name, so markers of one name and icon go together. A "show only" lasts until Show all or the game closes.
+// RB shows the marker types, as Legendary Map's legend does: A hides or shows every marker of a type. A type is kept as "kind|frame".
 //
 // THREADS. The input callback and UI tasks run on the game's main thread. Render runs on the render thread inside the
 // framework's frame. The marker list is an immutable shared vector swapped under the lock, so nothing is copied per frame.
@@ -81,10 +82,19 @@ namespace panel
 			bool hidden = false;
 		};
 
+		struct Kind
+		{
+			int frame = 0;
+			int markers = 0;
+			bool hidden = false;
+			std::string name;    // from the map's icon name: CaveMarker is "Cave"
+		};
+
 		struct MarkerList
 		{
 			std::vector<Marker> markers;     // by name
 			std::vector<std::string> grid;   // the on-screen keyboard's characters, without its last row (Space, Delete)
+			std::vector<Kind> kinds;         // the marker types on this map, by name
 		};
 
 		// The panel's life: closed; open (drawn, taking input); draining (it closed, and an invisible window keeps the input
@@ -117,6 +127,7 @@ namespace panel
 		std::atomic<bool> pendingSelect{ false }, pendingCancel{ false }, pendingGridPress{ false };
 		std::atomic<bool> gridOpen{ false };
 		std::atomic<bool> menuOpen{ false };
+		std::atomic<bool> typesOpen{ false };
 		std::atomic<int> pendingMenuMove{ 0 };
 		std::atomic<bool> pendingMenuPress{ false };
 		std::atomic<bool> lastDeviceGamepad{ false };
@@ -135,6 +146,7 @@ namespace panel
 		Only r_only = Only::kNone;
 		std::string r_onlyKey;
 		int r_onlyFrame = 0;
+		bool r_typesShown = false;
 		bool r_menuHasTarget = false;
 		int r_menuRow = 0;
 		int r_menuFrame = 0;
@@ -229,6 +241,20 @@ namespace panel
 		// ---- the map movie, UI tasks only ------------------------------------------------------------------------------
 
 		std::string MarkerKey(int a_frame, std::string_view a_label) { return std::format("{}|{}", a_frame, a_label); }
+		std::string KindKey(int a_frame) { return std::format("kind|{}", a_frame); }
+
+		// CaveMarker -> Cave, DwemerRuinMarker -> Dwemer Ruin.
+		std::string KindName(std::string_view a_iconName)
+		{
+			if (a_iconName.ends_with("Marker")) { a_iconName.remove_suffix(6); }
+			std::string out;
+			for (const char c : a_iconName)
+			{
+				if (!out.empty() && c >= 'A' && c <= 'Z') { out += ' '; }
+				out += c;
+			}
+			return out;
+		}
 
 		void LoadHidden()
 		{
@@ -318,7 +344,7 @@ namespace panel
 				int frame = 0;
 				if (!ReadLocation(clip, typeRange, label, frame)) { continue; }
 				const auto key = MarkerKey(frame, label);
-				const bool hide = hidden.contains(key) || (only == Only::kOne && key != onlyKey) || (only == Only::kKind && frame != onlyFrame);
+				const bool hide = hidden.contains(key) || hidden.contains(KindKey(frame)) || (only == Only::kOne && key != onlyKey) || (only == Only::kKind && frame != onlyFrame);
 				RE::GFxValue icon, shown;
 				if (!clip.GetMember("IconClip", &icon) || !icon.IsDisplayObject()) { continue; }
 				const int place = static_cast<int>(i);
@@ -414,11 +440,24 @@ namespace panel
 				marker.index = static_cast<int>(NumberMember(clip, "index", static_cast<double>(i)));
 				marker.folded = fold::Lower(marker.label);
 				marker.key = MarkerKey(marker.frame, marker.label);
-				marker.hidden = hidden.contains(marker.key);
+				marker.hidden = hidden.contains(marker.key) || hidden.contains(KindKey(marker.frame));
+				auto kind = std::ranges::find(list->kinds, marker.frame, &Kind::frame);
+				if (kind == list->kinds.end())
+				{
+					RE::GFxValue iconName;
+					Kind fresh;
+					fresh.frame = marker.frame;
+					fresh.hidden = hidden.contains(KindKey(marker.frame));
+					fresh.name = clip.GetMember("_iconName", &iconName) && iconName.IsString() && iconName.GetString() ? KindName(iconName.GetString()) : std::format("Type {}", marker.frame);
+					list->kinds.push_back(std::move(fresh));
+					kind = list->kinds.end() - 1;
+				}
+				++kind->markers;
 				names.push_back(marker.folded);
 				list->markers.push_back(std::move(marker));
 			}
 			std::ranges::stable_sort(list->markers, [](const Marker& a, const Marker& b) { return a.folded < b.folded; });
+			std::ranges::sort(list->kinds, {}, &Kind::name);
 			for (const char* c = kKeyboardBase; *c; ++c) { list->grid.emplace_back(1, *c); }
 			for (auto& character : fold::Alphabet(names))
 			{
@@ -671,7 +710,7 @@ namespace panel
 
 		// ---- input ------------------------------------------------------------------------------------------------------
 
-		enum class Key { kNone, kUp, kDown, kLeft, kRight, kConfirm, kCancel, kGrid, kBackspace, kToggle };
+		enum class Key { kNone, kUp, kDown, kLeft, kRight, kConfirm, kCancel, kGrid, kBackspace, kToggle, kTypes };
 
 		bool IsToggle(const RE::ButtonEvent& a_button)
 		{
@@ -688,6 +727,7 @@ namespace panel
 			{
 				// With the grid or the row menu open the D-pad walks them, so a toggle on the D-pad only toggles with both closed.
 				if (IsToggle(a_button) && !gridOpen && !menuOpen) { return Key::kToggle; }
+				if (code == 0x0200) { return Key::kTypes; }
 				switch (code)
 				{
 				case 0x0001: return Key::kUp;
@@ -709,6 +749,7 @@ namespace panel
 				case 0xC8: return Key::kUp;
 				case 0xD0: return Key::kDown;
 				case 0xCD: return Key::kRight;
+				case 0xCB: return Key::kLeft;
 				case 0x1C: case 0x9C: return Key::kConfirm;
 				case 0x01: case 0x0F: return Key::kCancel;  // Escape, Tab
 				case 0x0E: return Key::kBackspace;
@@ -793,6 +834,7 @@ namespace panel
 			pendingSelect = pendingCancel = pendingGridPress = false;
 			gridOpen = false;
 			menuOpen = false;
+			typesOpen = false;
 			pendingMenuMove = 0;
 			pendingMenuPress = false;
 			heldButtons = 0;
@@ -862,7 +904,7 @@ namespace panel
 			const auto type = a_event->GetEventType();
 			if (type == RE::INPUT_EVENT_TYPE::kChar)
 			{
-				if (static_cast<State>(state.load()) == State::kOpen && !menuOpen)
+				if (static_cast<State>(state.load()) == State::kOpen && !menuOpen && !typesOpen)
 				{
 					const auto text = fold::FromCodePoint(static_cast<const RE::CharEvent*>(a_event)->keyCode);
 					if (!text.empty())
@@ -949,10 +991,11 @@ namespace panel
 				break;
 			case Key::kLeft:
 				if (step && gridOpen) { --pendingGridX; }
+				else if (fresh && !gridOpen && !menuOpen && device == RE::INPUT_DEVICE::kKeyboard) { typesOpen = !typesOpen; }
 				break;
 			case Key::kRight:
 				if (step && gridOpen) { ++pendingGridX; }
-				else if (fresh && !gridOpen && device == RE::INPUT_DEVICE::kKeyboard) { menuOpen = !menuOpen; }
+				else if (fresh && !gridOpen && !typesOpen && device == RE::INPUT_DEVICE::kKeyboard) { menuOpen = !menuOpen; }
 				break;
 			case Key::kConfirm:
 				if (fresh)
@@ -967,6 +1010,7 @@ namespace panel
 				if (fresh)
 				{
 					if (menuOpen) { menuOpen = false; }
+					else if (typesOpen) { typesOpen = false; }
 					else if (gridOpen && device == RE::INPUT_DEVICE::kGamepad) { gridOpen = false; }
 					else
 					{
@@ -983,13 +1027,16 @@ namespace panel
 				}
 				break;
 			case Key::kGrid:
-				if (fresh && !menuOpen) { gridOpen = !gridOpen; }
+				if (fresh && !menuOpen && !typesOpen) { gridOpen = !gridOpen; }
+				break;
+			case Key::kTypes:
+				if (fresh && !menuOpen && !gridOpen) { typesOpen = !typesOpen; }
 				break;
 			case Key::kBackspace:
 				// Y: on the list the row's menu, on the keyboard a delete. The real Backspace always deletes.
 				if (device == RE::INPUT_DEVICE::kGamepad && !gridOpen)
 				{
-					if (fresh) { menuOpen = !menuOpen; }
+					if (fresh && !typesOpen) { menuOpen = !menuOpen; }
 				}
 				else if (step) { EditQuery([](std::string& q) { fold::DropLast(q); }); }
 				break;
@@ -1216,7 +1263,15 @@ namespace panel
 				ReadSoon();
 			}
 
-			const int count = static_cast<int>(r_filtered.size());
+			// The types view is the same list, of types: a new view starts from the top.
+			const bool types = typesOpen.load() && r_list;
+			if (types != r_typesShown)
+			{
+				r_typesShown = types;
+				r_highlight = 0;
+				r_top = 0;
+			}
+			const int count = static_cast<int>(types ? r_list->kinds.size() : r_filtered.size());
 			const int move = pendingNavigate.exchange(0);
 			r_highlight = count > 0 ? std::clamp(r_highlight + move, 0, count - 1) : 0;
 
@@ -1291,7 +1346,8 @@ namespace panel
 				SetWindowFontScale(static_cast<float>(settings::textScalePercent.load()) / 100.0f);
 
 				const bool titlePushed = PanelStyle::PushRowText(true);
-				if (const auto title = TR("MML_PanelTitle", "Map Markers"); r_only != Only::kNone) { Text("%s (%d) - %s", title.c_str(), count, TR("MML_TitleFiltered", "filtered").c_str()); }
+				if (types) { Text("%s", TR("MML_TypesTitle", "Marker types").c_str()); }
+				else if (const auto title = TR("MML_PanelTitle", "Map Markers"); r_only != Only::kNone) { Text("%s (%d) - %s", title.c_str(), count, TR("MML_TitleFiltered", "filtered").c_str()); }
 				else if (r_list && !r_list->markers.empty()) { Text("%s (%d)", title.c_str(), count); }
 				else { Text("%s", title.c_str()); }
 				PanelStyle::PopRowText(titlePushed);
@@ -1305,10 +1361,11 @@ namespace panel
 				const float rowH = GetTextLineHeightWithSpacing();
 				const float iconColumn = rowH * 1.3f;
 
-				const std::string hint = showMenu ? TR("MML_HintMenu", "D-pad: choose   A: do it   B: back to the list") :
+				const std::string hint = types ? TR("MML_HintTypes", "D-pad: move   A: hide or show the type   B: back to the list") :
+				                         showMenu ? TR("MML_HintMenu", "D-pad: choose   A: do it   B: back to the list") :
 				                         showGrid ? TR("MML_HintGrid", "D-pad: choose a letter   A: add it   Y: delete   B: back to the list") :
-				                         (lastDeviceGamepad ? TR("MML_HintPad", "D-pad: move   A: centre the map   X: type   Y: options   B: close") :
-				                                              TR("MML_HintKeys", "Type to search   Arrows or wheel: move   Right arrow: options   Enter or click: centre the map   Esc: close"));
+				                         (lastDeviceGamepad ? TR("MML_HintPad", "D-pad: move   A: centre the map   X: type   Y: options   RB: types   B: close") :
+				                                              TR("MML_HintKeys", "Type to search   Arrows or wheel: move   Right arrow: options   Left arrow: types   Enter or click: centre the map   Esc: close"));
 				const float hintH = CalcTextSize(hint.c_str(), nullptr, false, room.x).y + rowH;
 
 				// The grid's size, from the width: the list gives up its height while the grid or the row menu is open.
@@ -1373,7 +1430,23 @@ namespace panel
 					const auto& markers = r_list->markers;
 					for (int row = r_top; row < count && row < r_top + visible; ++row)
 					{
-						const Marker& marker = markers[static_cast<std::size_t>(r_filtered[static_cast<std::size_t>(row)])];
+						std::string rowText;
+						bool rowHidden = false;
+						int rowFrame = 0;
+						if (types)
+						{
+							const Kind& kind = r_list->kinds[static_cast<std::size_t>(row)];
+							rowText = std::format("{} ({})", kind.name, kind.markers);
+							rowHidden = kind.hidden;
+							rowFrame = kind.frame;
+						}
+						else
+						{
+							const Marker& marker = markers[static_cast<std::size_t>(r_filtered[static_cast<std::size_t>(row)])];
+							rowText = marker.label;
+							rowHidden = marker.hidden;
+							rowFrame = marker.frame;
+						}
 						const ImVec2 at = GetCursorScreenPos();
 						const bool selected = row == r_highlight;
 						if (selected && PanelStyle::IsActive())
@@ -1391,13 +1464,13 @@ namespace panel
 						if (IsItemHovered() && mouseMoved) { r_highlight = row; }
 						SameLine(textX);
 						// A hidden marker is dimmed; the highlight still reads as the highlight.
-						const auto* dimStyle = marker.hidden && !selected ? GetStyle() : nullptr;
+						const auto* dimStyle = rowHidden && !selected ? GetStyle() : nullptr;
 						if (dimStyle) { PushStyleColor(ImGuiCol_Text, dimStyle->Colors[ImGuiCol_TextDisabled]); }
 						const bool textPushed = !dimStyle && PanelStyle::PushRowText(selected);
-						TextUnformatted(marker.label.c_str());
+						TextUnformatted(rowText.c_str());
 						PanelStyle::PopRowText(textPushed);
 						if (dimStyle) { PopStyleColor(1); }
-						layout.slots.push_back({ at.y + lineH * 0.5f, marker.frame });
+						layout.slots.push_back({ at.y + lineH * 0.5f, rowFrame });
 					}
 				}
 
@@ -1501,7 +1574,27 @@ namespace panel
 				else { RunMenuAction(action); }
 			}
 
-			if (chosen >= 0 && chosen < count && r_list)
+			if (types)
+			{
+				// A press hides or shows the type; the view stays up to do the next one.
+				if (chosen >= 0 && chosen < count)
+				{
+					const Kind& kind = r_list->kinds[static_cast<std::size_t>(chosen)];
+					{
+						std::scoped_lock lock(g_lock);
+						const auto key = KindKey(kind.frame);
+						if (!g_hidden.erase(key)) { g_hidden.insert(key); }
+					}
+					logger::info("marker type \"{}\" {}", kind.name, kind.hidden ? "shown" : "hidden");
+					RunUI([] {
+						SaveHidden();
+						ApplyVisibility();
+						ReadMarkers();
+					});
+				}
+				if (cancel) { BeginDrain("closed from the types view"); }
+			}
+			else if (chosen >= 0 && chosen < count && r_list)
 			{
 				const Marker& marker = r_list->markers[static_cast<std::size_t>(r_filtered[static_cast<std::size_t>(chosen)])];
 				const int index = marker.index;
@@ -1603,6 +1696,7 @@ namespace panel
 	void DriveMenuToggle() { menuOpen = !menuOpen; }
 	void DriveMenuMove(int a_rows) { pendingMenuMove += a_rows; }
 	void DriveMenuPress() { pendingMenuPress = true; }
+	void DriveTypesToggle() { typesOpen = !typesOpen; }
 
 	std::string StateJson(int a_names)
 	{
@@ -1633,9 +1727,9 @@ namespace panel
 		names += "]";
 		return std::format(
 			R"({{"available":{},"open":{},"state":{},"hasMarkerList":{},"loading":{},"clipsMade":{},"typeRange":{},"listed":{},"query":"{}","filtered":{},"highlight":{},"top":{},"visibleRows":{},)"
-			R"("textInputHeld":{},"gridOpen":{},"gridChars":{},"menuOpen":{},"hiddenNames":{},"hiddenClips":{},"only":{},"iconsOk":{},"iconSlots":{},"rect":[{:.0f},{:.0f},{:.0f},{:.0f}],"opens":{},"selections":{},"showOnMapCalls":{},"claimedHeld":{},"gamepad":{},"language":"{}","style":{},"names":{}}})",
+			R"("textInputHeld":{},"gridOpen":{},"gridChars":{},"menuOpen":{},"typesOpen":{},"kinds":{},"hiddenNames":{},"hiddenClips":{},"only":{},"iconsOk":{},"iconSlots":{},"rect":[{:.0f},{:.0f},{:.0f},{:.0f}],"opens":{},"selections":{},"showOnMapCalls":{},"claimedHeld":{},"gamepad":{},"language":"{}","style":{},"names":{}}})",
 			window != nullptr, state.load() != 0, state.load(), g_hasList.load(), g_loading.load(), g_clipCount.load(), g_typeRange.load(), list ? list->markers.size() : 0, JsonEscape(query), lastFiltered.load(),
-			lastHighlight.load(), lastTop.load(), lastVisible.load(), g_textInputHeld, gridOpen.load(), lastGridChars.load(), menuOpen.load(), hiddenNames, g_hiddenClipCount.load(), only, g_iconsOk.load(), g_iconSlots.load(), lastX.load(), lastY.load(), lastW.load(), lastH.load(),
+			lastHighlight.load(), lastTop.load(), lastVisible.load(), g_textInputHeld, gridOpen.load(), lastGridChars.load(), menuOpen.load(), typesOpen.load(), list ? list->kinds.size() : 0, hiddenNames, g_hiddenClipCount.load(), only, g_iconsOk.load(), g_iconSlots.load(), lastX.load(), lastY.load(), lastW.load(), lastH.load(),
 			opens.load(), selections.load(), showOnMapCalls.load(), claimedHeld.size(), lastDeviceGamepad.load(), mml::Strings::Language(), PanelStyle::StateJson(), names);
 	}
 }
