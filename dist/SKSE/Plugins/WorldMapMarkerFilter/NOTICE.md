@@ -1,4 +1,4 @@
-# Map Marker List - copyright and licence
+# World Map Marker Filter - copyright and licence
 
 Copyright (C) 2026 ApocryphaRealm
 
@@ -29,4 +29,4 @@ This mod ships nothing from Simple Diving System (tsptds, Nexus 154534, AGPL-3.0
 time it asks the player's behaviour graph for the public variable that mod documents for other modders,
 `bSimpleDiving_IsDiving`, and sets it only if the variable is there. That mod remains a separate, optional download.
 
-Source code: https://github.com/ApocryphaRealm/MapMarkerList
+Source code: https://github.com/ApocryphaRealm/WorldMapMarkerFilter

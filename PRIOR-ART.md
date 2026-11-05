@@ -1,4 +1,4 @@
-# Prior art for Map Marker List (searched 2026-11-04, rule 24)
+# Prior art for World Map Marker Filter (searched 2026-11-04, rule 24)
 
 Searched Nexus (skyrimspecialedition, GraphQL `nameStemmed`, op MATCHES): map marker search, searchable map, map marker list, map
 search, world map search, find location map, map locations list, marker list, fast travel menu, fast travel list, quick travel,

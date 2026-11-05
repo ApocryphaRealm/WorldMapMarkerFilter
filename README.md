@@ -1,9 +1,9 @@
-# Map Marker List
+# World Map Marker Filter
 
 Version 1.0.0
 
-A panel down the left of the world map that lists the map's markers top to bottom by name, each with its icon beside it, and
-lets you search them by name. Choosing one centres the map on it.
+A searchable list of the world map's markers down the left of the map, each with its own icon. Hide or show a whole marker type
+from a legend, or a single marker from its own menu. Choosing one centres the map on it.
 
 ## Using it
 
@@ -21,13 +21,13 @@ Outside the world map both presses are left to the game.
 - The marker's menu: centre the map on it, hide it (or show it again), show only this one, show only this kind, and, while one of
   those is on, show all. A hidden marker leaves the map and stays in the list, dimmed, and stays hidden in every game until shown again.
   Markers of one name and icon go together. A "show only" lasts until Show all or the game closes.
-- **RB** shows the marker types, as Legendary Map's legend does: each type with how many markers it has, and **A** hides or shows them all. Hidden types stay hidden in every game until shown again. The type names come from the map's icon names, in English.
+- **RB** shows the marker types, like a legend: each type with how many markers it has, and **A** hides or shows them all. Hidden types stay hidden in every game until shown again. The type names come from the map's icon names, in English.
 - On-screen keyboard: QWERTY, then any other character the listed names use, so it fits every language, then Space and Delete. The
   D-pad walks the keys, **A** presses one, **Y** deletes.
 - Keyboard and mouse: type to search; arrows or the wheel move; the right arrow opens the marker's menu; the left arrow shows the types; Enter or a click centres the map; Backspace deletes; Esc or Tab closes.
 
 Only what the map shows is listed: a marker you have not found is not on the map, so it is not here, and a marker type another
-mod has hidden (Legendary Map) is left out. A marker the map shows as undiscovered is listed with that same icon.
+mod has hidden is left out. A marker the map shows as undiscovered is listed with that same icon.
 
 The icons are drawn by your own map movie, so icon replacers and CoMAP's icons appear as they do on the map. The panel wears the
 Apocrypha Menu Framework's theme, or the same style file as World Map Selector for Controller's panel when one is installed.
@@ -44,8 +44,13 @@ at a vcpkg checkout. Visual Studio, CMake and Ninja are found by `find-msvc.bat`
 
 ## Testing
 
-DevBench tool `mml.control`: `{}` for the state (add `"names":N` to list rows), and ops `open`, `close`, `nav`, `select`, `type`,
+DevBench tool `wmmf.control`: `{}` for the state (add `"names":N` to list rows), and ops `open`, `close`, `nav`, `select`, `type`,
 `backspace`, `clear`, `grid`, `gridmove`, `gridpress`.
+
+## Hidden markers
+
+Kept in `SKSE\Plugins\WorldMapMarkerFilter_Hidden.txt`. A `MapMarkerList_Hidden.txt` from this mod's earlier name is renamed to it the
+first time, or read as it is if the rename fails.
 
 ## Licence
 

@@ -25,7 +25,7 @@
 //
 // HIDING AND FILTERING. Y on a row opens a small menu. Hide and "show only" set a marker's IconClip._visible, as Legendary Map
 // hides its types, on the map itself. Only a clip this panel hid is ever shown again, so another mod's hidden type stays hidden.
-// Hidden markers stay in the list, dimmed, so they can be brought back; they are kept in MapMarkerList_Hidden.txt, as icon frame
+// Hidden markers stay in the list, dimmed, so they can be brought back; they are kept in WorldMapMarkerFilter_Hidden.txt, as icon frame
 // and name, so markers of one name and icon go together. A "show only" lasts until Show all or the game closes.
 // RB shows the marker types, as Legendary Map's legend does: A hides or shows every marker of a type. A type is kept as "kind|frame".
 //
@@ -42,6 +42,7 @@
 #include "Strings.h"
 #include "utils/Logger.h"
 
+#include <filesystem>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -61,7 +62,7 @@ namespace panel
 {
 	namespace
 	{
-		constexpr const char* kClipName = "MapMarkerList_Panel";
+		constexpr const char* kClipName = "WorldMapMarkerFilter_Panel";
 		constexpr const char* kRowSymbol = "LocationListEntry";
 		constexpr int kClipDepth = 16000;
 		constexpr int kDefaultTypeRange = 60;
@@ -69,7 +70,8 @@ namespace panel
 		constexpr int kGridRowsShown = 6;
 		constexpr int kGridColumns = 10;
 		constexpr const char* kKeyboardBase = "1234567890QWERTYUIOPASDFGHJKL'ZXCVBNM-.,";
-		constexpr const char* kHiddenFile = "Data/SKSE/Plugins/MapMarkerList_Hidden.txt";
+		constexpr const char* kHiddenFile = "Data/SKSE/Plugins/WorldMapMarkerFilter_Hidden.txt";
+		constexpr const char* kOldHiddenFile = "Data/SKSE/Plugins/MapMarkerList_Hidden.txt";  // this mod's name before 1.0.0 was posted
 		constexpr int kReadEveryFrames = 30;   // while the map is still making its marker clips
 
 		struct Marker
@@ -258,7 +260,20 @@ namespace panel
 
 		void LoadHidden()
 		{
-			std::ifstream in(kHiddenFile, std::ios::binary);
+			// A file left by the earlier name is renamed the first time; if the rename fails it is still read, and the next save
+			// writes the new name.
+			std::error_code ec;
+			const char* from = kHiddenFile;
+			if (!std::filesystem::exists(kHiddenFile, ec) && std::filesystem::exists(kOldHiddenFile, ec)) {
+				std::filesystem::rename(kOldHiddenFile, kHiddenFile, ec);
+				if (ec) {
+					logger::warn("could not rename {} to {} ({}); reading the old file", kOldHiddenFile, kHiddenFile, ec.message());
+					from = kOldHiddenFile;
+				} else {
+					logger::info("renamed {} to {}", kOldHiddenFile, kHiddenFile);
+				}
+			}
+			std::ifstream in(from, std::ios::binary);
 			std::string line;
 			std::scoped_lock lock(g_lock);
 			while (std::getline(in, line))
@@ -266,7 +281,7 @@ namespace panel
 				if (!line.empty() && line.back() == '\r') { line.pop_back(); }
 				if (line.find('|') != std::string::npos) { g_hidden.insert(line); }
 			}
-			logger::info("{} marker name(s) hidden, from {}", g_hidden.size(), kHiddenFile);
+			logger::info("{} marker name(s) hidden, from {}", g_hidden.size(), from);
 		}
 
 		void SaveHidden()

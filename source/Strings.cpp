@@ -15,7 +15,7 @@ namespace mml::Strings
 {
     namespace
     {
-        constexpr std::string_view kStem = "MapMarkerList";
+        constexpr std::string_view kStem = "WorldMapMarkerFilter";
 
         std::mutex lock;
         std::string language = "english";

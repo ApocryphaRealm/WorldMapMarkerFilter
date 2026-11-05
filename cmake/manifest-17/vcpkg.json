@@ -1,8 +1,8 @@
 {
-  "name": "mapmarkerlist-17",
+  "name": "worldmapmarkerfilter-17",
   "version-string": "1.0.0",
-  "description": "Map Marker List. A searchable list of the world map's markers. [Skyrim 1.7.x build line: CommonLibSSE-NG 7.2.0, cmake/ports-17]",
-  "homepage": "https://github.com/ApocryphaRealm/MapMarkerList",
+  "description": "World Map Marker Filter. A searchable list of the world map's markers. [Skyrim 1.7.x build line: CommonLibSSE-NG 7.2.0, cmake/ports-17]",
+  "homepage": "https://github.com/ApocryphaRealm/WorldMapMarkerFilter",
   "license": "GPL-3.0-or-later",
   "dependencies": [
     "commonlibsse-ng",

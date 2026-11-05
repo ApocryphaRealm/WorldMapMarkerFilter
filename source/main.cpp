@@ -1,4 +1,4 @@
-// Map Marker List - own code, GPL-3.0-or-later. A searchable list of the world map's markers, down the left of the map, on a
+// World Map Marker Filter - own code, GPL-3.0-or-later. A searchable list of the world map's markers, down the left of the map, on a
 // toggle. See include/Panel.h and source/Panel.cpp.
 #include "PCH.h"
 
@@ -62,16 +62,16 @@ namespace
 
 SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
-	SKSE::log::init("MapMarkerList");
+	SKSE::log::init("WorldMapMarkerFilter");
 	// Address Library pre-check, BEFORE SKSE::Init, which opens the Address Library itself: a missing file gets a message
 	// naming it and the plugin loads inert instead of CommonLibSSE-NG's bare failure line.
-	if (!AddressLibraryGuard::Guard("Map Marker List")) { return true; }
+	if (!AddressLibraryGuard::Guard("World Map Marker Filter")) { return true; }
 	SKSE::Init(a_skse);
 
 	settings::Load();
 	settings::ApplyLogLevel();
-	SKSE::log::describe_level("MapMarkerList.ini");
-	logger::info("Map Marker List {} loading", SKSE::PluginDeclaration::GetSingleton()->GetVersion().string("."));
+	SKSE::log::describe_level("WorldMapMarkerFilter.ini");
+	logger::info("World Map Marker Filter {} loading", SKSE::PluginDeclaration::GetSingleton()->GetVersion().string("."));
 
 	auto* messaging = SKSE::GetMessagingInterface();
 	if (!messaging || !messaging->RegisterListener(MessageHandler))

@@ -1,7 +1,7 @@
 #pragma once
 
 // An optional look for the panel, so it wears what World Map Selector for Controller's panel wears: the first of
-// Data\SKSE\Plugins\MapMarkerList_PanelStyle.ini and WorldMapSelectorForController_PanelStyle.ini (Norden UI - Black ships
+// Data\SKSE\Plugins\WorldMapMarkerFilter_PanelStyle.ini and WorldMapSelectorForController_PanelStyle.ini (Norden UI - Black ships
 // the second) is read, section [PanelStyle]. Every key is optional; a colour is #RRGGBB or #RRGGBBAA. An absent key keeps
 // the framework theme's colour for that part. Without a file the panel wears the menu framework's theme and frame.
 namespace mml::PanelStyle

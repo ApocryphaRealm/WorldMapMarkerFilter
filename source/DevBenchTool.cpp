@@ -11,7 +11,7 @@
 #include <string>
 #include <string_view>
 
-// DevBench tool "mml.control" (rules 31 and 64). A real test still presses the real key or button; these prove the panel,
+// DevBench tool "wmmf.control" (rules 31 and 64). A real test still presses the real key or button; these prove the panel,
 // not the input path.
 //   {}                      state; names=N adds that many of the rows the filter leaves, with their icon frames
 //   {"op":"open"}           asks for the panel through the same gate a press uses (the world map must be open)
@@ -87,20 +87,20 @@ namespace DevBenchTool
 		DevBenchAPI::IDevBenchInterface001* devBench = DevBenchAPI::GetDevBenchInterface001();
 		if (!devBench)
 		{
-			if (a_lastAttempt) { logger::info("DevBench not detected; skipping the \"mml.control\" tool"); }
+			if (a_lastAttempt) { logger::info("DevBench not detected; skipping the \"wmmf.control\" tool"); }
 			return;
 		}
 		constexpr const char* descriptor =
 			"{"
-			"\"description\":\"Map Marker List: the panel's live state and driver. op=state (default): open, listed and filtered rows, query, highlight, icon state, rectangle, counters; names=N lists rows. "
+			"\"description\":\"World Map Marker Filter: the panel's live state and driver. op=state (default): open, listed and filtered rows, query, highlight, icon state, rectangle, counters; names=N lists rows. "
 			"op=open asks through the same gate a press uses (the world map must be open). op=close. op=nav rows=N. op=select centres the map on the highlighted row and closes. "
 			"op=type text=T, op=backspace, op=clear edit the search. op=grid toggles the on-screen keyboard, op=gridmove dx dy, op=gridpress types the highlighted key. op=menu toggles the highlighted row's menu, op=menumove rows=N, op=menupress does its highlighted item. op=types toggles the marker types view (op=select hides or shows the highlighted type).\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{\"op\":{\"type\":\"string\"},\"rows\":{\"type\":\"integer\"},\"text\":{\"type\":\"string\"},\"names\":{\"type\":\"integer\"},\"dx\":{\"type\":\"integer\"},\"dy\":{\"type\":\"integer\"}}},"
 			"\"readOnly\":false"
 			"}";
-		if (devBench->RegisterTool("mml.control", descriptor, &ControlTool, nullptr))
+		if (devBench->RegisterTool("wmmf.control", descriptor, &ControlTool, nullptr))
 		{
-			logger::info("registered \"mml.control\" with DevBench (build {})", devBench->GetBuildNumber());
+			logger::info("registered \"wmmf.control\" with DevBench (build {})", devBench->GetBuildNumber());
 			registered = true;
 		}
 	}

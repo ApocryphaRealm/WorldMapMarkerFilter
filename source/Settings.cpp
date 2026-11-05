@@ -76,7 +76,7 @@ namespace settings
 
 	void Load()
 	{
-		const auto path = (std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" / "MapMarkerList.ini").string();
+		const auto path = (std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" / "WorldMapMarkerFilter.ini").string();
 		if (!std::filesystem::exists(path))
 		{
 			logger::warn("{} is not there; the compiled defaults are in force", path);

@@ -20,7 +20,7 @@ namespace mml::PanelStyle
 {
     namespace
     {
-        const auto stylePath = std::filesystem::absolute("Data\\SKSE\\Plugins\\MapMarkerList_PanelStyle.ini").string();
+        const auto stylePath = std::filesystem::absolute("Data\\SKSE\\Plugins\\WorldMapMarkerFilter_PanelStyle.ini").string();
         const auto siblingStylePath = std::filesystem::absolute("Data\\SKSE\\Plugins\\WorldMapSelectorForController_PanelStyle.ini").string();
 
         struct Colour

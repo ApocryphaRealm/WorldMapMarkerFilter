@@ -5,7 +5,7 @@
 #include <map>
 #include <string>
 
-// The mod's settings, read once from SKSE\Plugins\MapMarkerList.ini when the plugin loads. There is no settings page: the
+// The mod's settings, read once from SKSE\Plugins\WorldMapMarkerFilter.ini when the plugin loads. There is no settings page: the
 // mod's only settings are its two keys and the panel's size. Compiled defaults match the shipped INI (rule 16) and the
 // keys are in DEFAULT-KEYS.md.
 namespace settings
