@@ -6,6 +6,13 @@
 // and never one already labelled. A mod's clip is only attached when no unused clip is left, under a name of its own, so neither
 // mod's hint takes the other's place. Whether the hint is there is read from the labels rather than from this mod's own clip,
 // because addButton may have used one of SkyUI's spare clips instead.
+//
+// TWO ATTACHED CLIPS OVERLAPPED ("Select M <- Marker Filter", the owner's test, 2026-11-05). SkyUI's map fills all seven of its clips, so this
+// hint and World Map Selector's each attach one, in the same frame, as the map opens. A clip attached this frame is not initialized until its
+// onLoad next frame: gfx Button's label setter only stores the text, so MappedButton measures the clip's placeholder and the panel places the
+// NEXT clip by that width. onLoad then sets the real text and width, and nothing lays the panel out again, so whichever hint comes first in the
+// array (the sinks' order) runs under the second. A last clip has nothing after it, so either mod alone looks right. MappedButton's onLoad ends
+// with `_parent.onButtonLoad(this)`, undefined in SkyUI's map: answered here with the panel's own layout, for any fresh clip, either mod's.
 
 #include "PCH.h"
 
@@ -88,6 +95,28 @@ namespace keyhint
 			return a_panel.SetMember("maxButtons", a_buttons.GetArraySize());
 		}
 
+		// The panel's onButtonLoad: a fresh clip now has its real width. Runs on the panel's movie.
+		class LayOutAgain final : public RE::GFxFunctionHandler
+		{
+		public:
+			void Call(Params& a_params) override
+			{
+				if (!a_params.thisPtr) { return; }
+				a_params.thisPtr->Invoke("updateButtons", nullptr, std::array{ RE::GFxValue(true) });
+				logger::debug("a new clip in the map's button panel loaded; laid out again");
+			}
+		};
+
+		void LayOutWhenClipsLoad(RE::GFxMovieView* a_movie, RE::GFxValue& a_panel)
+		{
+			RE::GFxValue present;
+			if (a_panel.GetMember("onButtonLoad", &present) && !present.IsUndefined()) { return; }
+			RE::GFxValue function;
+			RE::GPtr<LayOutAgain> handler{ new LayOutAgain() };
+			a_movie->CreateFunction(&function, handler.get());
+			if (!a_panel.SetMember("onButtonLoad", function)) { logger::warn("could not set the button panel's onButtonLoad; a second added hint may overlap this one"); }
+		}
+
 		class InputSink final : public RE::BSTEventSink<RE::InputEvent*>
 		{
 		public:
@@ -149,6 +178,8 @@ namespace keyhint
 			logger::debug("this map has no SkyUI button panel; no button hint");
 			return;
 		}
+
+		LayOutWhenClipsLoad(movie, panel);  // before the early return: World Map Selector's fresh clip needs it whether or not this hint is new
 
 		bool unused = false;
 		std::uint32_t filled = 0;

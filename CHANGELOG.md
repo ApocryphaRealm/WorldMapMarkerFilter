@@ -16,3 +16,6 @@ Rule 61: this mod's own history, kept beside the code it describes.
 - Choosing a marker centres the map on it through skse.ShowOnMap, with the Location Finder's found-marker ring, and closes the panel.
 - The icons are the map movie's own LocationListEntry symbol placed under the framework's window, so icon replacers and CoMAP's icons show as they do on the map.
 - DevBench tool wmmf.control, eleven languages, INI keys for the two toggles, panel width and text size; reads World Map Selector for Controller's panel style file.
+
+### Fixed
+- This hint and World Map Selector for Controller's no longer overlap on the world map's button bar, in either load order. Each attaches a new clip as the map opens; a new clip reports the width of its placeholder until it loads the next frame, and the panel placed the next hint by that width. The panel now lays itself out again when a clip loads (its onButtonLoad call, which SkyUI's map leaves empty). World Map Selector is unchanged.
