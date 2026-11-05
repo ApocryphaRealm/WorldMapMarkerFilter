@@ -32,6 +32,8 @@ mod has hidden is left out. A marker the map shows as undiscovered is listed wit
 The icons are drawn by your own map movie, so icon replacers and CoMAP's icons appear as they do on the map. The panel wears the
 Apocrypha Menu Framework's theme, or the same style file as World Map Selector for Controller's panel when one is installed.
 
+A hint in the map's button bar, **Marker Filter**, shows the controller button with a controller in use and the key otherwise, following `iTogglePad` and `iToggleKey`; `bShowKeyHint=0` in `[Panel]` hides it. It sits beside any other mod's hint in that bar, such as World Map Selector for Controller's.
+
 ## Requirements
 
 SKSE64, Address Library for SKSE Plugins, the Apocrypha Menu Framework, and SkyUI's map (or a UI mod built on it, such as Norden UI).

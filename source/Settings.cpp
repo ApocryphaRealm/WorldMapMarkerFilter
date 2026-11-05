@@ -88,6 +88,7 @@ namespace settings
 		ReadUInt(keys, "itogglepad:keys", togglePad);
 		ReadInt(keys, "iwidthpercent:panel", widthPercent, 15, 40);
 		ReadInt(keys, "itextscalepercent:panel", textScalePercent, 80, 160);
+		ReadInt(keys, "bshowkeyhint:panel", showKeyHint, 0, 1);
 		logger::info("settings: {} read (key 0x{:02X}, button 0x{:04X}, width {}%, text {}%)", path, toggleKey.load(), togglePad.load(),
 			widthPercent.load(), textScalePercent.load());
 	}

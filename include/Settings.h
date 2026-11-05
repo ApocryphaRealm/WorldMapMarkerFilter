@@ -17,6 +17,7 @@ namespace settings
 		static constexpr std::uint32_t togglePad = 0x0004;  // XInput mask: D-pad left
 		static constexpr int widthPercent = 22;
 		static constexpr int textScalePercent = 100;
+		static constexpr int showKeyHint = 1;
 	};
 
 	inline std::atomic<std::uint32_t> logLevel{ Defaults::logLevel };    // uLogLevel:Debug
@@ -24,6 +25,8 @@ namespace settings
 	inline std::atomic<std::uint32_t> togglePad{ Defaults::togglePad };  // iTogglePad:Keys, 0 = off
 	inline std::atomic<int> widthPercent{ Defaults::widthPercent };      // iWidthPercent:Panel, 15 to 40
 	inline std::atomic<int> textScalePercent{ Defaults::textScalePercent };  // iTextScalePercent:Panel, 80 to 160
+
+	inline std::atomic<int> showKeyHint{ Defaults::showKeyHint };  // bShowKeyHint:Panel, 0 or 1
 
 	void Load();
 	void ApplyLogLevel();

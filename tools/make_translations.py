@@ -25,6 +25,7 @@ T = {
 "MML_MenuShowAll": ["Show all", "全部显示", "Zobrazit vše", "Tout afficher", "Alle anzeigen", "Mostra tutto", "すべて表示", "모두 표시", "Pokaż wszystkie", "Показать все", "Mostrar todo"],
 "MML_TitleFiltered": ["filtered", "已筛选", "filtrováno", "filtré", "gefiltert", "filtrato", "絞り込み中", "필터됨", "filtrowane", "с фильтром", "filtrado"],
 "MML_KeySpace": ["Space", "空格", "Mezera", "Espace", "Leertaste", "Spazio", "スペース", "스페이스", "Spacja", "Пробел", "Espacio"],
+"MML_HintBar": ["Marker Filter", "标记筛选", "Filtr značek", "Filtre de marqueurs", "Markierungsfilter", "Filtro segnalini", "マーカーフィルター", "표시 필터", "Filtr znaczników", "Фильтр меток", "Filtro de marcadores"],
 "MML_KeyDelete": ["Delete", "删除", "Smazat", "Effacer", "Löschen", "Cancella", "削除", "지우기", "Usuń", "Удалить", "Borrar"],
 }
 

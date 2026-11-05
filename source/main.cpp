@@ -2,6 +2,7 @@
 // toggle. See include/Panel.h and source/Panel.cpp.
 #include "PCH.h"
 
+#include "KeyHint.h"
 #include "DevBenchTool.h"
 #include "Panel.h"
 #include "Settings.h"
@@ -20,7 +21,7 @@ namespace
 		{
 			if (a_event && a_event->menuName == RE::MapMenu::MENU_NAME)
 			{
-				if (a_event->opening) { panel::OnMapMenuOpened(); }
+				if (a_event->opening) { panel::OnMapMenuOpened(); keyhint::Show(); }
 				else { panel::OnMapMenuClosed(); }
 			}
 			return RE::BSEventNotifyControl::kContinue;
@@ -40,6 +41,7 @@ namespace
 			break;
 		case SKSE::MessagingInterface::kInputLoaded:
 			settings::ApplyFrameworkReservedKeys();
+			keyhint::Register();
 			break;
 		case SKSE::MessagingInterface::kDataLoaded:
 			mml::Strings::Load();

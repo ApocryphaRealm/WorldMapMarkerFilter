@@ -25,6 +25,8 @@ presses one, Y deletes.
 Keyboard and mouse: type to search. Arrows or the wheel move. The right arrow opens the marker's menu, the left arrow shows the
 types. Enter or a click centres the map. Backspace deletes. Esc or Tab closes.
 
+The world map's button bar shows a Marker Filter hint with the button or key that opens the panel. bShowKeyHint=0 in the INI hides it.
+
 WHAT IT LISTS
 What the map shows. A marker you have not found is not on the map, so it is not here, and a marker type another mod has hidden is
 left out. A marker the map shows as undiscovered is listed with that same icon.
@@ -37,7 +39,7 @@ SKSE64, Address Library for SKSE Plugins, the Apocrypha Menu Framework, and SkyU
 Recommended with it: World Map Selector for Controller.
 
 SETTINGS
-SKSE\Plugins\WorldMapMarkerFilter.ini: the keys that open the panel, its width and text size. Read when the game starts.
+SKSE\Plugins\WorldMapMarkerFilter.ini: the keys that open the panel, its width and text size, and the button bar hint. Read when the game starts.
 Log: Documents\My Games\Skyrim Special Edition\SKSE\WorldMapMarkerFilter.log
 
 Licence: GPL-3.0-or-later. See SKSE\Plugins\WorldMapMarkerFilter\.
