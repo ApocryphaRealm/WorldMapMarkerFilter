@@ -133,6 +133,12 @@ namespace panel
 		std::atomic<int> pendingMenuMove{ 0 };
 		std::atomic<bool> pendingMenuPress{ false };
 		std::atomic<bool> lastDeviceGamepad{ false };
+		// The keyboard key that opened the panel also makes a character event, which Windows sends just AFTER the key's button
+		// event, so it reached the search box ("/" typed on every keyboard open, combined run B-20261106-033230-3509). Set on a
+		// keyboard open; the next character event is dropped if it comes within kToggleCharWindow and before any other key goes down.
+		std::atomic<bool> swallowToggleChar{ false };
+		std::chrono::steady_clock::time_point swallowToggleCharSince;
+		constexpr auto kToggleCharWindow = std::chrono::milliseconds(500);
 		enum : std::uint32_t { kHeldConfirm = 1, kHeldCancel = 2 };
 		std::atomic<std::uint32_t> heldButtons{ 0 };
 
@@ -904,6 +910,11 @@ namespace panel
 						lastDeviceGamepad = pressed->GetDevice() == RE::INPUT_DEVICE::kGamepad;
 						if (TryOpen(lastDeviceGamepad ? "controller button" : "keyboard key"))
 						{
+							if (!lastDeviceGamepad)
+							{
+								swallowToggleCharSince = std::chrono::steady_clock::now();
+								swallowToggleChar = true;
+							}
 							RememberClaimed(*pressed);
 							return true;
 						}
@@ -919,6 +930,13 @@ namespace panel
 			const auto type = a_event->GetEventType();
 			if (type == RE::INPUT_EVENT_TYPE::kChar)
 			{
+				if (swallowToggleChar.exchange(false) && std::chrono::steady_clock::now() - swallowToggleCharSince < kToggleCharWindow)
+				{
+					// The opening key's own character, not typing: left out, and the search cleared as a backstop.
+					logger::debug("dropped the character of the key that opened the panel (U+{:04X})", static_cast<const RE::CharEvent*>(a_event)->keyCode);
+					EditQuery([](std::string& q) { q.clear(); });
+					return true;
+				}
 				if (static_cast<State>(state.load()) == State::kOpen && !menuOpen && !typesOpen)
 				{
 					const auto text = fold::FromCodePoint(static_cast<const RE::CharEvent*>(a_event)->keyCode);
@@ -979,7 +997,11 @@ namespace panel
 			if (device != RE::INPUT_DEVICE::kKeyboard && device != RE::INPUT_DEVICE::kGamepad) { return false; }  // the mouse stays with ImGui
 
 			// While open every key and button is the panel's: its letters are typing, so they must not fire a hotkey.
-			if (button->IsDown()) { RememberClaimed(*button); }
+			if (button->IsDown())
+			{
+				RememberClaimed(*button);
+				if (!IsToggle(*button)) { swallowToggleChar = false; }  // a real key typed next keeps its character
+			}
 			if (static_cast<State>(state.load()) != State::kOpen) { return true; }
 			if (button->Value() == 0.0f)
 			{

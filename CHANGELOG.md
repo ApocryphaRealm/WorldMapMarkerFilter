@@ -18,4 +18,5 @@ Rule 61: this mod's own history, kept beside the code it describes.
 - DevBench tool wmmf.control, eleven languages, INI keys for the two toggles, panel width and text size; reads World Map Selector for Controller's panel style file.
 
 ### Fixed
+- Opening the panel with the keyboard key no longer types that key into the search (it opened as '/' with no markers listed). The opening key's character is left out, and the search is cleared when that happens.
 - This hint and World Map Selector for Controller's no longer overlap on the world map's button bar, in either load order. Each attaches a new clip as the map opens; a new clip reports the width of its placeholder until it loads the next frame, and the panel placed the next hint by that width. The panel now lays itself out again when a clip loads (its onButtonLoad call, which SkyUI's map leaves empty). World Map Selector is unchanged.
