@@ -1,6 +1,6 @@
 {
     "name": "worldmapmarkerfilter",
-    "version-string": "1.0.0",
+    "version-string": "1.1.0",
     "description": "World Map Marker Filter - a searchable list of the world map's markers, down the left of the map.",
     "homepage": "https://github.com/ApocryphaRealm/WorldMapMarkerFilter",
     "license": "GPL-3.0-or-later",

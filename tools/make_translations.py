@@ -22,6 +22,8 @@ T = {
 "MML_MenuShow": ["Show it again", "重新显示", "Znovu zobrazit", "Réafficher", "Wieder anzeigen", "Mostra di nuovo", "再び表示", "다시 표시", "Pokaż ponownie", "Показать снова", "Volver a mostrar"],
 "MML_MenuOnlyOne": ["Show only this one", "只显示这一个", "Zobrazit jen tuto", "Afficher seulement celui-ci", "Nur diese anzeigen", "Mostra solo questo", "これだけ表示", "이것만 표시", "Pokaż tylko ten", "Показать только этот", "Mostrar solo este"],
 "MML_MenuOnlyKind": ["Show only this kind", "只显示此类", "Zobrazit jen tento druh", "Afficher seulement ce type", "Nur diese Art anzeigen", "Mostra solo questo tipo", "この種類だけ表示", "이 종류만 표시", "Pokaż tylko ten rodzaj", "Показать только этот тип", "Mostrar solo este tipo"],
+"MML_MenuHideKind": ["Hide this kind", "隐藏此类", "Skrýt tento druh", "Masquer ce type", "Diese Art ausblenden", "Nascondi questo tipo", "この種類を隠す", "이 종류 숨기기", "Ukryj ten rodzaj", "Скрыть этот тип", "Ocultar este tipo"],
+"MML_MenuShowKind": ["Show this kind again", "重新显示此类", "Znovu zobrazit tento druh", "Réafficher ce type", "Diese Art wieder anzeigen", "Mostra di nuovo questo tipo", "この種類を再表示", "이 종류 다시 표시", "Pokaż znowu ten rodzaj", "Снова показать этот тип", "Volver a mostrar este tipo"],
 "MML_MenuShowAll": ["Show all", "全部显示", "Zobrazit vše", "Tout afficher", "Alle anzeigen", "Mostra tutto", "すべて表示", "모두 표시", "Pokaż wszystkie", "Показать все", "Mostrar todo"],
 "MML_TitleFiltered": ["filtered", "已筛选", "filtrováno", "filtré", "gefiltert", "filtrato", "絞り込み中", "필터됨", "filtrowane", "с фильтром", "filtrado"],
 "MML_KeySpace": ["Space", "空格", "Mezera", "Espace", "Leertaste", "Spazio", "スペース", "스페이스", "Spacja", "Пробел", "Espacio"],

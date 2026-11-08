@@ -159,6 +159,7 @@ namespace panel
 		int r_menuRow = 0;
 		int r_menuFrame = 0;
 		bool r_menuHidden = false;
+		bool r_menuKindHidden = false;
 		std::string r_menuKey, r_menuLabel;
 		int r_readCountdown = 0;
 		int r_drainFrames = 0;
@@ -1206,12 +1207,12 @@ namespace panel
 			Dummy(ImVec2{ room.x, a_height });
 		}
 
-		enum class MenuAction { kCentre, kHide, kShow, kOnlyOne, kOnlyKind, kShowAll };
+		enum class MenuAction { kCentre, kHide, kShow, kOnlyOne, kOnlyKind, kShowAll, kHideKind, kShowKind };
 
 		// Changes what the map shows, then lets the map and the list catch up. Render thread.
 		void RunMenuAction(MenuAction a_action)
 		{
-			const bool hiddenChanged = a_action == MenuAction::kHide || a_action == MenuAction::kShow;
+			const bool hiddenChanged = a_action == MenuAction::kHide || a_action == MenuAction::kShow || a_action == MenuAction::kHideKind || a_action == MenuAction::kShowKind;
 			{
 				std::scoped_lock lock(g_lock);
 				switch (a_action)
@@ -1227,6 +1228,8 @@ namespace panel
 					g_onlyFrame = r_menuFrame;
 					break;
 				case MenuAction::kShowAll: g_only = Only::kNone; break;
+				case MenuAction::kHideKind: g_hidden.insert(KindKey(r_menuFrame)); break;
+				case MenuAction::kShowKind: g_hidden.erase(KindKey(r_menuFrame)); break;
 				default: return;
 				}
 				++g_queryGeneration;
@@ -1336,6 +1339,7 @@ namespace panel
 					r_menuLabel = marker.label;
 					r_menuFrame = marker.frame;
 					r_menuHidden = marker.hidden;
+					r_menuKindHidden = std::ranges::any_of(r_list->kinds, [&](const Kind& k) { return k.frame == marker.frame && k.hidden; });
 				}
 				else
 				{
@@ -1351,6 +1355,8 @@ namespace panel
 				else { menuItems.emplace_back(MenuAction::kHide, TR("MML_MenuHide", "Hide it")); }
 				menuItems.emplace_back(MenuAction::kOnlyOne, TR("MML_MenuOnlyOne", "Show only this one"));
 				menuItems.emplace_back(MenuAction::kOnlyKind, TR("MML_MenuOnlyKind", "Show only this kind"));
+				if (r_menuKindHidden) { menuItems.emplace_back(MenuAction::kShowKind, TR("MML_MenuShowKind", "Show this kind again")); }
+				else { menuItems.emplace_back(MenuAction::kHideKind, TR("MML_MenuHideKind", "Hide this kind")); }
 				if (r_only != Only::kNone) { menuItems.emplace_back(MenuAction::kShowAll, TR("MML_MenuShowAll", "Show all")); }
 				r_menuRow = std::clamp(r_menuRow + pendingMenuMove.exchange(0), 0, static_cast<int>(menuItems.size()) - 1);
 			}
