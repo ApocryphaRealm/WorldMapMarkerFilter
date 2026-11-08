@@ -2,7 +2,7 @@
 
 Rule 61: this mod's own history, kept beside the code it describes.
 
-## 1.1.0 - 2026-11-08 - untested
+## 1.1.0 - 2026-11-08 - working
 
 ### Added
 - The marker menu has Hide this kind (and Show this kind again on a hidden kind), beside Show only this kind.
